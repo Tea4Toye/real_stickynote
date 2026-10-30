@@ -6,7 +6,7 @@ A Windows desktop app for notes that stay in sight until the work is done. Each 
 
 ## Run the app
 
-Open `release/Real Sticky Note Setup 0.1.0.exe` to install for your Windows account. Or open `release/win-unpacked/Real Sticky Note.exe` directly. Keep the entire `win-unpacked` folder together. Windows 10/11 x64; no administrator access required. The installer is unsigned, so Windows may show a publisher warning.
+Open `release/Real Sticky Note Setup 0.2.0.exe` to install for your Windows account. Or open `release/win-unpacked/Real Sticky Note.exe` directly. Keep the entire `win-unpacked` folder together. Windows 10/11 x64; no administrator access required. The installer is unsigned, so Windows may show a publisher warning.
 
 For development, with Node.js 24 installed:
 
@@ -24,6 +24,18 @@ Press **Ctrl + Shift + T** from any app to capture a note. Choose Checklist and 
 Drag a note by its top bar, or resize its edges. The board's pin button brings a floating note forward. **Crushed** contains completed notes; **Ashes** contains notes you set aside. **Revive** brings either back; **Undo** reverses recent note changes during the current session.
 
 The tray icon opens the board and its right-click menu provides hiding, capture protection, ghost release, settings, and Quit. Closing the board keeps the app running. Use **Ctrl + Shift + Space** to toggle the board.
+
+### Snooze and focus
+
+Snooze lowers a note behind other applications for 5, 15, 30, or 60 minutes. Choose a time from the Snooze pill at the bottom of the floating note. The note stays on the board with a **Wake now** button. At expiry it becomes topmost again without taking keyboard focus. Deadlines survive an app restart or computer sleep; an overdue snooze wakes when the app next runs. App-pinned notes return with their pinned app. Snoozed notes and their wake day are protected from Daily Burn.
+
+Focus is a separate work timer using the existing 15, 25, or 50 minute presets. It shows a countdown and a reminder when the session ends. Snoozing keeps its timer and checked items intact.
+
+To exit ghost mode without touching a click-through note, use the board's **Exit ghost mode** button, **Ctrl + Alt + G**, or **Release all ghost notes** in the tray menu. Hold Alt to temporarily interact with a ghost note.
+
+### Updating an installed copy
+
+Quit the currently running app from its tray menu, then run the 0.2.0 installer over the existing installation. The app ID and local data format are unchanged, so your existing notes are retained. No uninstall is needed.
 
 ### More tools
 
@@ -66,6 +78,8 @@ No account, telemetry, cloud service, update checker, or background web requests
 npm test
 npm run test:desktop
 npm run test:edges
+npm run test:windows
+npm run test:snooze
 npm run build
 ```
 

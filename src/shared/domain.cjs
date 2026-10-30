@@ -171,7 +171,9 @@ function createNote(input, now = new Date()) {
     ghost: Boolean(input.ghost),
     appBinding: input.appBinding && typeof input.appBinding === 'object' ? { ...input.appBinding } : null,
     bounds: input.bounds && typeof input.bounds === 'object' ? { ...input.bounds } : null,
-    focus: null
+    focus: null,
+    snoozedUntil: null,
+    snoozeWakeDate: null
   };
 }
 
@@ -195,7 +197,9 @@ function completeNote(note, now = new Date()) {
     status: 'done',
     completedAt: isoNow,
     updatedAt: isoNow,
-    focus: null
+    focus: null,
+    snoozedUntil: null,
+    snoozeWakeDate: null
   };
 }
 
@@ -241,7 +245,9 @@ function nextOccurrence(note, now = new Date()) {
     ghost: Boolean(note.ghost),
     appBinding: note.appBinding ? { ...note.appBinding } : null,
     bounds: note.bounds ? { ...note.bounds } : null,
-    focus: null
+    focus: null,
+    snoozedUntil: null,
+    snoozeWakeDate: null
   };
 }
 
@@ -256,8 +262,9 @@ function burnNotes(notes, now = new Date()) {
     const isNonRepeat = !note.repeat || note.repeat === 'none';
     const hasNoChecklist = !Array.isArray(note.items) || note.items.length === 0;
     const isEarlierDay = note.createdAt ? (dayKey(new Date(note.createdAt)) < todayKey) : false;
+    const isSnoozeProtected = (note.snoozedUntil !== null && note.snoozedUntil !== undefined) || (note.snoozeWakeDate === todayKey);
 
-    const shouldBurn = note.status === 'active' && isUndated && isNonRepeat && hasNoChecklist && isEarlierDay;
+    const shouldBurn = note.status === 'active' && isUndated && isNonRepeat && hasNoChecklist && isEarlierDay && !isSnoozeProtected;
 
     return {
       ...note,
@@ -287,8 +294,71 @@ function restoreNote(note, now = new Date()) {
     completedAt: null,
     burnedAt: null,
     focus: null,
+    snoozedUntil: null,
+    snoozeWakeDate: null,
     appBinding: note.appBinding ? { ...note.appBinding } : null,
     bounds: note.bounds ? { ...note.bounds } : null
+  };
+}
+
+function snoozeNote(note, minutes, now = new Date()) {
+  if (!note || typeof note !== 'object') {
+    throw new TypeError('Note must be an object');
+  }
+  if (note.status !== 'active') {
+    throw new Error('Cannot snooze non-active note');
+  }
+  if (typeof minutes !== 'number' || !Number.isFinite(minutes) || minutes < 1 || minutes > 1440) {
+    throw new Error('Invalid minutes: must be a finite number between 1 and 1440');
+  }
+  const nowD = toValidDate(now);
+  const isoNow = nowD.toISOString();
+  const snoozedUntil = new Date(nowD.getTime() + minutes * 60000).toISOString();
+
+  return {
+    ...note,
+    items: Array.isArray(note.items) ? note.items.map(item => ({ ...item })) : [],
+    appBinding: note.appBinding && typeof note.appBinding === 'object' ? { ...note.appBinding } : null,
+    bounds: note.bounds && typeof note.bounds === 'object' ? { ...note.bounds } : null,
+    focus: note.focus && typeof note.focus === 'object' ? { ...note.focus } : (note.focus ?? null),
+    snoozedUntil,
+    snoozeWakeDate: null,
+    floating: true,
+    updatedAt: isoNow
+  };
+}
+
+function isSnoozed(note, now = new Date()) {
+  if (!note || typeof note !== 'object') return false;
+  if (note.status !== 'active') return false;
+  if (!note.snoozedUntil) return false;
+  const until = note.snoozedUntil instanceof Date ? note.snoozedUntil : new Date(note.snoozedUntil);
+  if (Number.isNaN(until.getTime())) return false;
+  const nowD = toValidDate(now);
+  return until.getTime() > nowD.getTime();
+}
+
+function wakeNote(note, now = new Date()) {
+  if (!note || typeof note !== 'object') {
+    throw new TypeError('Note must be an object');
+  }
+  if (note.status !== 'active') {
+    throw new Error('Cannot wake non-active note');
+  }
+  const nowD = toValidDate(now);
+  const isoNow = nowD.toISOString();
+  const snoozeWakeDate = dayKey(nowD);
+
+  return {
+    ...note,
+    items: Array.isArray(note.items) ? note.items.map(item => ({ ...item })) : [],
+    appBinding: note.appBinding && typeof note.appBinding === 'object' ? { ...note.appBinding } : null,
+    bounds: note.bounds && typeof note.bounds === 'object' ? { ...note.bounds } : null,
+    focus: note.focus && typeof note.focus === 'object' ? { ...note.focus } : (note.focus ?? null),
+    floating: true,
+    snoozedUntil: null,
+    snoozeWakeDate,
+    updatedAt: isoNow
   };
 }
 
@@ -302,5 +372,8 @@ module.exports = {
   completeNote,
   nextOccurrence,
   burnNotes,
-  restoreNote
+  restoreNote,
+  snoozeNote,
+  wakeNote,
+  isSnoozed
 };

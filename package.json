@@ -1,6 +1,6 @@
 {
   "name": "real-sticky-note",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Persistent Windows sticky notes with checklists, a daily board, and paper rituals.",
   "author": "Real Sticky Note",
   "private": true,
@@ -10,6 +10,8 @@
     "test": "node --test tests/*.test.cjs",
     "test:desktop": "node scripts/desktop-test.cjs",
     "test:edges": "node scripts/edge-test.cjs",
+    "test:windows": "node scripts/window-regression-test.cjs",
+    "test:snooze": "node scripts/snooze-desktop-test.cjs",
     "build": "electron-builder --win nsis --x64",
     "pack": "electron-builder --win --dir --x64"
   },

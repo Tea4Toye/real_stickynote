@@ -5,6 +5,7 @@ const { randomUUID } = require('node:crypto');
 const { Store, validate } = require('./store.cjs');
 const domain = require('../shared/domain.cjs');
 const { observeWindows } = require('./windows.cjs');
+const { applyNativeState } = require('./note-presentation.cjs');
 
 const testMode = process.env.STICKY_TEST === '1';
 if (process.env.STICKY_DATA_DIR) app.setPath('userData', path.resolve(process.env.STICKY_DATA_DIR));
@@ -24,7 +25,7 @@ function broadcast() {
   const data = snapshot();
   const globalProtection=Boolean(store.state.settings.protectCapture || (store.state.settings.autoPrivacy&&nativeState.microphone));
   const containsPrivate=store.state.notes.some(n=>n.private||n.ghost);
-  for(const win of windows.values())if(!win.isDestroyed())win.setContentProtection(globalProtection||containsPrivate);
+  for(const win of windows.values())if(!win.isDestroyed())applyNativeState(win,{protection:globalProtection||containsPrivate});
   for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.send('state', data);
 }
 function persist() { store.save(); syncNotes(); refreshTray(); broadcast(); }
@@ -70,14 +71,22 @@ function showPage(view='board', command) {
   return win;
 }
 function toggleBoard() { const win=windows.get('board'); if(win?.isVisible()) win.hide(); else showPage(); }
+function changeWindowGeometry(win, change) {
+  clearTimeout(win.geometryTimer);
+  win.programmaticMove=true;
+  change();
+  win.geometryTimer=setTimeout(()=>{if(!win.isDestroyed())win.programmaticMove=false;},400);
+}
 function applyNoteWindow(win,n) {
   const settings=store.state.settings;
-  win.setContentProtection(Boolean(n.private || n.ghost || settings.protectCapture || (settings.autoPrivacy && nativeState.microphone)));
-  const ghost = n.ghost && !nativeState.alt;
-  win.setIgnoreMouseEvents(ghost,{forward:true});
-  win.setOpacity(ghost ? settings.ghostOpacity : 1);
+  const snoozed=domain.isSnoozed(n);
+  const ghost = Boolean(n.ghost && !nativeState.alt && !snoozed);
+  applyNativeState(win,{
+    protection:Boolean(n.private || n.ghost || settings.protectCapture || (settings.autoPrivacy && nativeState.microphone)),
+    ignoreMouse:ghost,opacity:ghost?settings.ghostOpacity:1,topmost:!snoozed,lowered:snoozed,
+  },window=>observer?.lowerWindow(window.getNativeWindowHandle()));
   let visible = !settings.hideAll;
-  if(n.appBinding) visible = visible && external?.name?.toLowerCase() === n.appBinding.name.toLowerCase();
+  if(n.appBinding&&!snoozed) visible = visible && external?.name?.toLowerCase() === n.appBinding.name.toLowerCase();
   if(visible && !win.isVisible()) win.showInactive();
   if(!visible && win.isVisible()) win.hide();
 }
@@ -89,15 +98,17 @@ function syncNotes() {
       const offset = noteWindows.size*26;
       const bounds = safeBounds(n.bounds || { ...safeBounds(null), x:screen.getPrimaryDisplay().workArea.x+65+offset, y:screen.getPrimaryDisplay().workArea.y+100+offset });
       win=createWindow('note',{...bounds,minWidth:290,minHeight:44,skipTaskbar:true,alwaysOnTop:true,noteId:n.id,transparent:true,backgroundColor:'#00000000'});
+      win.fullWidth=bounds.width;
       win.fullHeight=bounds.height;
       win.setAlwaysOnTop(true,'screen-saver');
       win.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
       noteWindows.set(n.id,win);
       win.once('ready-to-show',()=>{ if(!win.isDestroyed()) applyNoteWindow(win,findNote(n.id)); });
       let boundsTimer;
-      const saveBounds=()=>{if(win.programmaticMove)return;clearTimeout(boundsTimer);boundsTimer=setTimeout(()=>{if(win.isDestroyed()||win.programmaticMove)return;const current=findNote(n.id);current.bounds=win.getBounds();if(win.tucked)current.bounds.height=win.fullHeight;else win.fullHeight=current.bounds.height; if(current.appBinding && external) current.appBinding.offset={x:current.bounds.x-external.x,y:current.bounds.y-external.y};store.save();},300);};
-      win.on('moved',saveBounds);win.on('resized',saveBounds);
-      win.on('closed',()=>{clearTimeout(boundsTimer);noteWindows.delete(n.id);});
+      const saveBounds=(resized=false)=>{if(win.programmaticMove)return;clearTimeout(boundsTimer);boundsTimer=setTimeout(()=>{if(win.isDestroyed()||win.programmaticMove)return;const current=findNote(n.id);const actual=win.getBounds();if(resized&&!win.tucked){win.fullWidth=Math.max(290,actual.width);win.fullHeight=Math.max(210,actual.height);}current.bounds={...actual,width:win.fullWidth,height:win.fullHeight};if(current.appBinding && external)current.appBinding.offset={x:actual.x-external.x,y:actual.y-external.y};store.save();},300);};
+      win.on('moved',()=>saveBounds(false));win.on('resized',()=>saveBounds(true));
+      win.on('will-resize',()=>{clearTimeout(win.geometryTimer);win.programmaticMove=false;});
+      win.on('closed',()=>{clearTimeout(boundsTimer);clearTimeout(win.geometryTimer);noteWindows.delete(n.id);});
       win.on('close',event=>{if(!quitting && findNote(n.id).status==='active' && findNote(n.id).floating){event.preventDefault();showPage();}});
     }
     applyNoteWindow(win,n);
@@ -162,6 +173,10 @@ function runMaintenance() {
   let changed=false;
   if(store.state.settings.dailyBurn && Date.now()-lastBurnCheck>30000){lastBurnCheck=Date.now();const notes=domain.burnNotes(store.state.notes);if(JSON.stringify(notes)!==JSON.stringify(store.state.notes)){store.state.notes=notes;changed=true;}}
   const now=Date.now();
+  for(const n of store.state.notes)if(n.status==='active'&&n.snoozedUntil&&Date.parse(n.snoozedUntil)<=now){
+    Object.assign(n,domain.wakeNote(n));
+    notify('Your snoozed note is back',n.text.slice(0,100),()=>{noteWindows.get(n.id)?.show();});changed=true;
+  }
   for(const n of store.state.notes) if(n.status==='active' && n.focus && !n.focus.notified && n.focus.endAt<=now){
     n.focus.notified=true;
     const key=domain.dayKey(); const wrap=store.state.wraps[key] ||= {};
@@ -191,11 +206,14 @@ async function action(type,payload,win) {
     case 'archive': {const n=findNote(data.id);remember();n.status='ashes';n.burnedAt=new Date().toISOString();n.focus=null;persist();return;}
     case 'restore': {const n=findNote(data.id);remember();Object.assign(n,domain.restoreNote(n));persist();return;}
     case 'undo': {const previous=undo.pop();if(previous){store.state.notes=JSON.parse(previous);persist();}return;}
-    case 'float': {const n=findNote(data.id);n.floating=data.value!==false;persist();if(n.floating)noteWindows.get(n.id)?.focus();return;}
+    case 'float': {const n=findNote(data.id);n.floating=data.value!==false;if(n.floating&&n.snoozedUntil)Object.assign(n,domain.wakeNote(n));persist();if(n.floating)noteWindows.get(n.id)?.focus();return;}
+    case 'snooze': {const n=findNote(data.id);remember();Object.assign(n,domain.snoozeNote(n,Number(data.minutes)));persist();return n.snoozedUntil;}
+    case 'wake': {const n=findNote(data.id);Object.assign(n,domain.wakeNote(n));persist();return;}
+    case 'releaseGhosts': {releaseGhosts();return;}
     case 'private': {const n=findNote(data.id);n.private=!n.private;persist();return;}
     case 'ghost': {const n=findNote(data.id);n.ghost=!n.ghost;persist();return;}
     case 'bind': {const n=findNote(data.id);if(data.clear)n.appBinding=null;else{if(!external)throw new Error('Switch to the app you want, then reopen the board.');n.appBinding={name:external.name,offset:null};}persist();return;}
-    case 'tuck': {const n=findNote(data.id);const noteWin=noteWindows.get(n.id);if(!noteWin)return;const tucked=Boolean(data.value&&n.appBinding&&store.state.settings.tuckAppNotes);if(noteWin.tucked===tucked)return;noteWin.tucked=tucked;noteWin.programmaticMove=true;noteWin.setSize(noteWin.getBounds().width,tucked?44:noteWin.fullHeight);setTimeout(()=>{if(!noteWin.isDestroyed())noteWin.programmaticMove=false;},400);return;}
+    case 'tuck': {const n=findNote(data.id);const noteWin=noteWindows.get(n.id);if(!noteWin)return;const tucked=Boolean(data.value&&n.appBinding&&store.state.settings.tuckAppNotes&&!domain.isSnoozed(n));if(noteWin.tucked===tucked)return;noteWin.tucked=tucked;changeWindowGeometry(noteWin,()=>noteWin.setSize(noteWin.fullWidth,tucked?44:noteWin.fullHeight));return;}
     case 'focus': {const n=findNote(data.id);const minutes=Number(data.minutes);if(!Number.isFinite(minutes)||minutes<1||minutes>180)throw new Error('Choose 1 to 180 minutes.');n.focus={endAt:Date.now()+minutes*60000,durationMinutes:minutes,notified:false};persist();return;}
     case 'stopFocus': {findNote(data.id).focus=null;persist();return;}
     case 'settings': {
@@ -260,19 +278,19 @@ if(!app.requestSingleInstanceLock()){app.quit();}else{
       const origin=screen.screenToDipPoint({x:Math.round(raw.x),y:Math.round(raw.y)});
       const corner=screen.screenToDipPoint({x:Math.round(raw.x+raw.width),y:Math.round(raw.y+raw.height)});
       const update={...raw,...origin,width:corner.x-origin.x,height:corner.y-origin.y};
-      const changed=nativeState.alt!==update.alt||nativeState.microphone!==update.microphone;
+      const changed=nativeState.microphone!==update.microphone;
       nativeState=update;
       if(update.pid!==process.pid && update.name && !['powershell','pwsh','explorer'].includes(update.name.toLowerCase()))external=update;
       for(const n of store.state.notes){const win=noteWindows.get(n.id);if(!win||win.isDestroyed()||n.status!=='active')continue;
         // Own note/editor windows retain the previous app so editing doesn't hide the note.
         const own=update.pid===process.pid;
         const active=own?external:update;
-        if(n.appBinding && active?.name?.toLowerCase()===n.appBinding.name.toLowerCase() && !own){
+        if(n.appBinding && !domain.isSnoozed(n) && active?.name?.toLowerCase()===n.appBinding.name.toLowerCase() && !own){
           const offset=n.appBinding.offset || {x:active.width-win.getBounds().width-14,y:42};
           const bounds=safeBounds({...win.getBounds(),x:active.x+offset.x,y:active.y+offset.y});
-          if(win.getBounds().x!==bounds.x||win.getBounds().y!==bounds.y){win.programmaticMove=true;win.setPosition(bounds.x,bounds.y);setTimeout(()=>{if(!win.isDestroyed())win.programmaticMove=false;},350);}
+          if(win.getBounds().x!==bounds.x||win.getBounds().y!==bounds.y)changeWindowGeometry(win,()=>win.setPosition(bounds.x,bounds.y));
         }
-        if(n.appBinding&&!own&&active?.name?.toLowerCase()!==n.appBinding.name.toLowerCase())win.hide();else applyNoteWindow(win,n);
+        if(n.appBinding&&!domain.isSnoozed(n)&&!own&&active?.name?.toLowerCase()!==n.appBinding.name.toLowerCase())win.hide();else applyNoteWindow(win,n);
       }
       if(changed)broadcast();
     },message=>{observerError=message;broadcast();});

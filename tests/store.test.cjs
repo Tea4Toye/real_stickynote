@@ -40,3 +40,18 @@ test('failed writes roll memory back to the last saved state and preserve the fi
   assert.throws(()=>store.save(),/last saved data is intact/);
   assert.equal(store.state.wraps.today,undefined);assert.equal(fs.readFileSync(store.file,'utf8'),original);
 });
+test('upgrading a 0.1 note file preserves existing text, checked items, timers, and bindings', () => {
+  const {createNote}=require('../src/shared/domain.cjs');
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sticky-legacy-upgrade-'));
+  const note=createNote({text:'Existing personal work',items:[{text:'Already done',done:true},{text:'Next step',done:false}],appBinding:{name:'editor'}});
+  delete note.snoozedUntil;delete note.snoozeWakeDate;
+  note.focus={endAt:Date.now()+60000,durationMinutes:15,notified:false};
+  fs.writeFileSync(path.join(dir,'notes.json'),JSON.stringify({...defaults(),notes:[note]}));
+  const store=new Store(dir);assert.deepEqual(store.state.notes[0],note);store.save();
+  assert.deepEqual(new Store(dir).state.notes[0],note);
+});
+test('backup validation rejects invalid snooze timestamps', () => {
+  const {createNote}=require('../src/shared/domain.cjs');
+  const note=createNote({text:'Reminder'});note.snoozedUntil='not a date';
+  assert.throws(()=>validate({...defaults(),notes:[note]}),/invalid snooze deadline/);
+});

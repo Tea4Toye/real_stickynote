@@ -21,6 +21,8 @@ function validate(data) {
     ids.add(n.id);
     if (n.items.some(i => !i || typeof i.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(i.id) || typeof i.text !== 'string' || i.text.length > 500 || typeof i.done !== 'boolean') || new Set(n.items.map(i=>i.id)).size!==n.items.length) throw new Error('Backup contains an invalid checklist.');
     createNote(n);
+    if(n.snoozedUntil!=null&&(typeof n.snoozedUntil!=='string'||!Number.isFinite(Date.parse(n.snoozedUntil))))throw new Error('Backup contains an invalid snooze deadline.');
+    if(n.snoozeWakeDate!=null&&(typeof n.snoozeWakeDate!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(n.snoozeWakeDate)))throw new Error('Backup contains an invalid wake date.');
     if(!BOARDS.includes(n.board)||!COLORS.includes(n.color))throw new Error('Backup contains an unknown board or paper color.');
     if (n.appBinding && (typeof n.appBinding.name !== 'string' || n.appBinding.name.length > 260)) throw new Error('Backup contains an invalid app binding.');
     if (n.bounds && !['x','y','width','height'].every(k=>Number.isFinite(n.bounds[k]))) throw new Error('Backup contains invalid window bounds.');

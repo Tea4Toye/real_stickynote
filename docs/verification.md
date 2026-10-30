@@ -4,7 +4,7 @@ Built on Windows 11 x64, build 26200, using Node 24.14.1, Electron 45.1.0, Playw
 
 ## Automated checks
 
-`npm test`: 32 passing tests. Covers note validation, checklist completion guards, local date rollover and catchup, dates/checklist/repeat burn protection, weekly anchors, recurrence after absence, restore, URL filtering, durable storage, damaged-primary recovery, unrecoverable-data preservation, and failed-write rollback.
+`npm test`: 43 passing tests. Covers note validation, checklist completion guards, local date rollover and catchup, dates/checklist/repeat burn protection, weekly anchors, recurrence after absence, restore, URL filtering, durable storage, damaged-primary recovery, unrecoverable-data preservation, and failed-write rollback.
 
 `npm run test:desktop`: passed with real Electron windows and an isolated temporary data directory. Covers editor controls, colored checklists, native always-on-top flag, partial-completion rejection, relaunch with saved checkbox state, ghost opacity/release, final-checkbox completion, recovery, timer setup, journal autosave, PNG export, saved links, backup export, safe defaults, notes remaining open when the board hides, helper startup, and no renderer exceptions.
 
@@ -27,3 +27,9 @@ The Windows installer and unpacked app are generated under `release/`. PowerShel
 The desktop suite also passed against `release/win-unpacked/Real Sticky Note.exe`, including restart persistence, native note windows, and the packaged PowerShell helper starting without an error. Tests use isolated temporary application data and disable startup and protocol registration.
 
 Final artifact hashes and sizes are recorded in `release/SHA256SUMS.txt` after the final build.
+
+## Version 0.2.0
+
+The original desktop and edge suites were rerun after the update. New tests cover native size stability over 20 rapid and four delayed app-tab cycles, snooze persistence and actual expiry, Wake now, partial-checklist preservation, focus preservation, visible ghost exit, stable DOM identity, and no redundant native opacity/click-through updates. See window-regressions.md for reproduction and fixes.
+
+All four desktop suites also passed against the packaged 0.2.0 executable: desktop, edges, windows, and snooze. The unit suite includes reading and resaving an old note file without changing its text, checked items, focus session, or app binding. Live system clipboard access remains unavailable in the execution session; injected ClipboardItem input was still used for that part of the edge suite.

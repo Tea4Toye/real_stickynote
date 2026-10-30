@@ -17,8 +17,18 @@ if (-not ([System.Management.Automation.PSTypeName]'Win32Observer').Type) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Collections.Concurrent;
+using System.Threading;
 
 public static class Win32Observer {
+    public static readonly ConcurrentQueue<string> Commands = new ConcurrentQueue<string>();
+    public static void StartCommands() {
+        var thread = new Thread(() => { string line; while ((line = Console.In.ReadLine()) != null) Commands.Enqueue(line); });
+        thread.IsBackground = true;
+        thread.Start();
+    }
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
         public int Left;
@@ -52,6 +62,7 @@ public static class Win32Observer {
 
 try {
     [Win32Observer]::SetProcessDPIAware() | Out-Null
+    [Win32Observer]::StartCommands()
 } catch {}
 
 function Test-MicrophoneInUse {
@@ -115,17 +126,37 @@ function Test-MicrophoneInUse {
     return $false
 }
 
-$lastMicCheck = 0
+$clock = [System.Diagnostics.Stopwatch]::StartNew()
+$lastMicCheck = -2000
+$lastWindowCheck = -250
 $micActive = $false
+$previousAlt = $false
+$previousJson = ""
+$pidNum = 0; $procName = ""; $winTitle = ""; $x = 0; $y = 0; $w = 0; $h = 0
 
 while ($true) {
     try {
-        $now = [Environment]::TickCount
+        $emit = $false
+        $now = $clock.ElapsedMilliseconds
+        [string]$commandLine = ""
+        while ([Win32Observer]::Commands.TryDequeue([ref]$commandLine)) {
+            try {
+                $command = $commandLine | ConvertFrom-Json
+                if ($command.type -eq "lower" -and [string]$command.handle -match "^[0-9]{1,19}$") {
+                    $handleValue = [long]::Parse([string]$command.handle)
+                    if ($handleValue -gt 0) { [Win32Observer]::SetWindowPos([IntPtr]$handleValue, [IntPtr]1, 0, 0, 0, 0, 0x13) | Out-Null }
+                }
+            } catch {}
+        }
         if ($lastMicCheck -eq 0 -or [Math]::Abs($now - $lastMicCheck) -ge 2000) {
             $micActive = Test-MicrophoneInUse
             $lastMicCheck = $now
+            $emit = $true
         }
 
+        if ($now - $lastWindowCheck -ge 200) {
+        $lastWindowCheck = $now
+        $emit = $true
         $hwnd = [Win32Observer]::GetForegroundWindow()
         $pidNum = 0
         $procName = ""
@@ -167,9 +198,12 @@ while ($true) {
         if ($null -eq $procName) { $procName = "" }
         if ($null -eq $winTitle) { $winTitle = "" }
 
-        # Alt key state (VK_MENU = 0x12)
+        }
+        # Alt is sampled every 25ms; expensive foreground and microphone work is cached.
         $altState = [Win32Observer]::GetAsyncKeyState(0x12)
         $isAlt = (($altState -band 0x8000) -ne 0)
+        if ($isAlt -ne $previousAlt) { $emit = $true; $previousAlt = $isAlt }
+        if (-not $emit) { [System.Threading.Thread]::Sleep(25); continue }
 
         $payload = [PSCustomObject]@{
             pid        = [int]$pidNum
@@ -184,8 +218,8 @@ while ($true) {
         }
 
         $json = $payload | ConvertTo-Json -Compress
-        [System.Console]::Out.WriteLine($json)
+        if ($json -ne $previousJson) { [System.Console]::Out.WriteLine($json); $previousJson = $json }
     } catch {}
 
-    [System.Threading.Thread]::Sleep(250)
+    [System.Threading.Thread]::Sleep(25)
 }

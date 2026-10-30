@@ -271,6 +271,15 @@ body.note-window #app { height: 100vh; display: flex; }
 .progress-label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
 .focus-picker { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
 .focus-picker select { background: transparent; border: none; font-size: 12px; color: var(--text-main); outline: none; cursor: pointer; }
+.snooze-picker { display: inline-flex; align-items: center; gap: 4px; padding: 5px 8px; border: 1px solid rgba(48,51,45,.14); border-radius: 16px; background: rgba(255,255,255,.3); color: var(--text-main); }
+.snooze-picker select { max-width: 82px; background: transparent; border: none; color: inherit; font: 12px var(--font-ui); cursor: pointer; }
+.wake-button, .snooze-status, .ghost-recovery button { border: 1px solid rgba(48,51,45,.18); background: rgba(255,255,255,.6); color: var(--text-main); border-radius: 12px; padding: 5px 9px; font: 600 11px var(--font-ui); cursor: pointer; }
+.snooze-status { margin: 0 8px 8px; text-align: left; border-radius: 6px; }
+.ghost-recovery { display: flex; align-items: center; gap: 8px; }
+.ghost-recovery button { flex-shrink: 0; }
+.snooze-tag { font-weight: 600; }
+.note-control-group { flex-shrink: 0; }
+.note-drag > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .focus-running { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: #c0392b; }
 .timer-done {
   position: absolute; bottom: 46px; left: 12px; right: 12px; background: #ffffff;
