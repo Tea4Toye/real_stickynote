@@ -1,0 +1,75 @@
+const { _electron:electron, expect } = require('playwright/test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
+const {createNote,dayKey}=require('../src/shared/domain.cjs');
+const {defaults}=require('../src/main/store.cjs');
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'sticky-edge-'));
+const old=new Date();old.setDate(old.getDate()-4);
+const data=defaults();data.settings.dailyBurn=true;
+const plain=createNote({text:'Undated scratch',floating:false},old);
+const list=createNote({text:'Protected checklist',items:['Still unfinished']},old);
+const dated=createNote({text:'Protected due date',dueDate:dayKey(old),floating:false},old);
+const repeating=createNote({text:'Weekly ritual',dueDate:dayKey(old),repeat:'weekly',floating:false},old);
+const timed=createNote({text:'Focus session',dueDate:dayKey(),floating:false});
+timed.focus={endAt:Date.now()-1000,durationMinutes:25,notified:false};
+data.notes=[plain,list,dated,repeating,timed];
+fs.writeFileSync(path.join(dir,'notes.json'),JSON.stringify(data));
+let app;
+async function state(page){return page.evaluate(()=>window.sticky.snapshot());}
+async function action(page,type,payload={}){const r=await page.evaluate(([t,p])=>window.sticky.action(t,p),[type,payload]);assert.equal(r.ok,true,r.error);return r.value;}
+(async()=>{try{
+  const env={...process.env,STICKY_TEST:'1',STICKY_DATA_DIR:dir};delete env.ELECTRON_RUN_AS_NODE;
+  const executablePath=process.env.STICKY_EXECUTABLE;
+  app=await electron.launch({...(executablePath?{executablePath:path.resolve(executablePath),args:[]}:{args:[path.resolve('.')]}),env});
+  await expect.poll(()=>app.windows().find(p=>p.url().includes('view=board'))).toBeTruthy();
+  const board=app.windows().find(p=>p.url().includes('view=board'));await board.waitForSelector('h1');
+  let s=await state(board);
+  assert.equal(s.notes.find(n=>n.id===plain.id).status,'ashes');
+  for(const n of [list,dated,repeating])assert.equal(s.notes.find(x=>x.id===n.id).status,'active');
+  assert.equal(s.notes.find(n=>n.id===timed.id).focus.notified,true);
+  assert.equal(s.wraps[dayKey()].focusMinutes,25);
+  await action(board,'complete',{id:repeating.id});s=await state(board);
+  const next=s.notes.find(n=>n.id!==repeating.id&&n.text===repeating.text);
+  assert.equal(next.status,'active');assert.ok(next.dueDate>dayKey());assert.equal(s.notes.find(n=>n.id===repeating.id).status,'done');
+  await action(board,'settings',{hideAll:true});
+  assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('view=note')).isVisible()),false);
+  await action(board,'settings',{hideAll:false});
+  assert.equal(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('view=note')).isVisible()),true);
+  await action(board,'settings',{linkCatcher:true});
+  const firstLink='https://example.org/new-link?utm_source=sticky&topic=paper';
+  await app.evaluate(({clipboard},text)=>clipboard.writeText(text),firstLink);
+  const clipboardAvailable=await app.evaluate(async({clipboard},text)=>(await clipboard.readText())===text,firstLink);
+  async function feedClipboard(text){
+    if(clipboardAvailable)await app.evaluate(({clipboard},text)=>clipboard.writeText(text),text);
+    else await app.evaluate(({clipboard,ClipboardItem},text)=>{clipboard.read=async()=>[new ClipboardItem({'text/plain':text})];},text);
+  }
+  await feedClipboard(firstLink);
+  await expect.poll(async()=>(await state(board)).links.length,{timeout:5000}).toBe(1);
+  s=await state(board);assert.equal(s.links[0].url,'https://example.org/new-link?topic=paper');
+  await feedClipboard('https://example.org/new-link?utm_source=different&topic=paper');
+  await expect.poll(async()=>(await state(board)).notes.filter(n=>n.board==='Reading').length).toBe(1);
+  await action(board,'page',{view:'wrap'});
+  await expect.poll(()=>app.windows().find(p=>p.url().includes('view=wrap'))).toBeTruthy();
+  const wrap=app.windows().find(p=>p.url().includes('view=wrap'));await wrap.waitForSelector('[data-include]');
+  await wrap.locator('[data-include]').uncheck();
+  await wrap.getByRole('button',{name:'Good',exact:true}).click();
+  await expect(wrap.locator('[data-include]')).not.toBeChecked();
+  await wrap.getByLabel('Card size').selectOption('wide');await wrap.getByRole('button',{name:'Save card'}).click();
+  await expect.poll(()=>fs.existsSync(path.join(dir,'daily-wrap.png'))).toBe(true);
+  const png=fs.readFileSync(path.join(dir,'daily-wrap.png'));assert.equal(png.readUInt32BE(16),1200);assert.equal(png.readUInt32BE(20),630);
+  await expect(wrap.locator('[data-include]')).not.toBeChecked();
+  s=await state(board);assert.equal(s.wraps[dayKey()].focusMinutes,25); // No double counting after later ticks.
+  const boundId=await action(board,'create',{text:'Window tab test',appBinding:{name:'test-target'},floating:true});
+  const boundHeight=()=>app.evaluate(({BrowserWindow},id)=>BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().includes('id='+id))?.getBounds().height,boundId);
+  await expect.poll(boundHeight).toBeLessThanOrEqual(64);
+  await action(board,'settings',{tuckAppNotes:false});
+  await expect.poll(boundHeight).toBeGreaterThanOrEqual(210);
+  await action(board,'settings',{tuckAppNotes:true});
+  await expect.poll(boundHeight).toBeLessThanOrEqual(64);
+  await action(board,'bind',{id:boundId,clear:true});
+  await expect.poll(boundHeight).toBeGreaterThanOrEqual(210);
+  await app.close();app=null;
+  console.log(JSON.stringify({status:'passed',directory:dir,clipboard:clipboardAvailable?'native Windows clipboard':'injected ClipboardItem input; system clipboard unavailable in this execution session',checks:['midnight catchup','checklist/date/repeat protection','timer expiry and once-only accounting','weekly recurrence','hide and restore all windows','clipboard parsing and deduplication','share-card exclusions survive autosave','wide PNG dimensions','native tab collapse and expansion after disabling/unbinding']},null,2));
+}catch(error){console.error(error);process.exitCode=1;}finally{if(app)await app.close();}})();
