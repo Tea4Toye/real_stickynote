@@ -1,0 +1,60 @@
+{
+  "name": "real-sticky-note",
+  "version": "0.2.0",
+  "description": "Persistent Windows sticky notes with checklists, a daily board, and paper rituals.",
+  "author": "Real Sticky Note",
+  "private": true,
+  "main": "src/main/index.cjs",
+  "scripts": {
+    "start": "node scripts/start.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "test:desktop": "node scripts/desktop-test.cjs",
+    "test:edges": "node scripts/edge-test.cjs",
+    "test:windows": "node scripts/window-regression-test.cjs",
+    "test:snooze": "node scripts/snooze-desktop-test.cjs",
+    "build": "electron-builder --win nsis --x64",
+    "pack": "electron-builder --win --dir --x64"
+  },
+  "devDependencies": {
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0",
+    "playwright": "1.64.1"
+  },
+  "build": {
+    "appId": "com.realstickynote.desktop",
+    "productName": "Real Sticky Note",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "assets/icon.png",
+      "assets/icon.ico",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "src/main/*.ps1"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico",
+      "signExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "protocols": [
+      {
+        "name": "Real Sticky Note commands",
+        "schemes": [
+          "realsticky"
+        ]
+      }
+    ]
+  }
+}
